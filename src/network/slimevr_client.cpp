@@ -132,16 +132,19 @@ esp_err_t SlimeVRClient::sendHandshake()
     buffer.writeByte(PACKET_HANDSHAKE);
     buffer.writeULong(0);
 
-    buffer.writeInt(5);
-    buffer.writeInt(8);
-    buffer.writeInt(2);
+    buffer.writeInt(5); // Board
+    buffer.writeInt(8); // IMU
+    buffer.writeInt(2); // CPU Count
+
     buffer.writeInt(0);
     buffer.writeInt(0);
     buffer.writeInt(0);
-    buffer.writeInt(16);
-    buffer.writeShortString("0.3.3");
+
+    buffer.writeInt(16); // Build Version
+    buffer.writeShortString("0.3.3"); // Version String
     uint8_t mac[6] = {0xC4, 0xDE, 0xE2, 0x13, 0x95, 0xEC};
-    buffer.writeByteArray(mac, sizeof(mac));
+    buffer.writeByteArray(mac, sizeof(mac)); // Mac Address
+
     ESP_LOGI(TAG, "Sending handshake");
     return this->udpClient.send(buffer);
 }
@@ -154,7 +157,7 @@ void SlimeVRClient::internalPacketReceived(char buffer[], size_t size, struct so
     {
         snprintf(hex_buffer + i * 3, 4, "%02X ", (unsigned char)buffer[i]);
     }
-    ESP_LOGI(TAG, "Data (hex): %s", hex_buffer);
+    ESP_LOGI(TAG, "%s:%d: %s", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), hex_buffer);
 
     switch (buffer[0])
     {

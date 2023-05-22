@@ -9,12 +9,19 @@ private:
     unsigned char *buffer;
     size_t bufferSize;
     size_t currentPosition;
+    unsigned char convBuf[8];
 
 public:
     NetBuffer(size_t size);
     ~NetBuffer();
     NetBuffer(const NetBuffer &other);
     NetBuffer &operator=(const NetBuffer &other);
+
+private:
+    template <typename T>
+    unsigned char *toChars(T src);
+    template <typename T>
+    T fromChars(unsigned char *const src);
 
 public:
     esp_err_t seek(size_t position);

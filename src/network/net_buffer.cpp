@@ -2,6 +2,37 @@
 
 #include <cstring>
 
+template <typename T>
+unsigned char * NetBuffer::toChars(T src)
+{
+    union data
+    {
+        unsigned char buffer[sizeof(T)];
+        T value;
+    } un;
+    un.value = src;
+    for (size_t i = 0; i < sizeof(T); i++)
+    {
+        convBuf[i] = un.buffer[sizeof(T) - i - 1];
+    }
+    return convBuf;
+}
+
+template <typename T>
+T NetBuffer::fromChars(unsigned char * const src)
+{
+    union data
+    {
+        unsigned char buffer[sizeof(T)];
+        T value;
+    } un;
+    for (size_t i = 0; i < sizeof(T); i++)
+    {
+        un.buffer[i] = src[sizeof(T) - i - 1];
+    }
+    return un.value;
+}
+
 NetBuffer::NetBuffer(size_t size)
 {
     buffer = new unsigned char[size];
@@ -51,7 +82,7 @@ esp_err_t NetBuffer::writeByte(int8_t data)
     {
         return ESP_FAIL;
     }
-    std::memcpy(this->buffer + this->currentPosition, reinterpret_cast<unsigned char *>(&data), sizeof(int8_t));
+    std::memcpy(this->buffer + this->currentPosition, toChars(data), sizeof(int8_t));
     this->currentPosition += sizeof(int8_t);
     return ESP_OK;
 }
@@ -62,7 +93,7 @@ esp_err_t NetBuffer::writeUByte(uint8_t data)
     {
         return ESP_FAIL;
     }
-    std::memcpy(this->buffer + this->currentPosition, reinterpret_cast<unsigned char *>(&data), sizeof(uint8_t));
+    std::memcpy(this->buffer + this->currentPosition, toChars(data), sizeof(uint8_t));
     this->currentPosition += sizeof(uint8_t);
     return ESP_OK;
 }
@@ -73,7 +104,7 @@ esp_err_t NetBuffer::writeInt(int32_t data)
     {
         return ESP_FAIL;
     }
-    std::memcpy(this->buffer + this->currentPosition, reinterpret_cast<unsigned char *>(&data), sizeof(int32_t));
+    std::memcpy(this->buffer + this->currentPosition, toChars(data), sizeof(int32_t));
     this->currentPosition += sizeof(int32_t);
     return ESP_OK;
 }
@@ -84,7 +115,7 @@ esp_err_t NetBuffer::writeUInt(uint32_t data)
     {
         return ESP_FAIL;
     }
-    std::memcpy(this->buffer + this->currentPosition, reinterpret_cast<unsigned char *>(&data), sizeof(uint32_t));
+    std::memcpy(this->buffer + this->currentPosition, toChars(data), sizeof(uint32_t));
     this->currentPosition += sizeof(uint32_t);
     return ESP_OK;
 }
@@ -95,7 +126,8 @@ esp_err_t NetBuffer::writeLong(int64_t data)
     {
         return ESP_FAIL;
     }
-    std::memcpy(this->buffer + this->currentPosition, reinterpret_cast<unsigned char *>(&data), sizeof(int64_t));
+
+    std::memcpy(this->buffer + this->currentPosition, toChars(data), sizeof(int64_t));
     this->currentPosition += sizeof(int64_t);
     return ESP_OK;
 }
@@ -106,7 +138,8 @@ esp_err_t NetBuffer::writeULong(uint64_t data)
     {
         return ESP_FAIL;
     }
-    std::memcpy(this->buffer + this->currentPosition, reinterpret_cast<unsigned char *>(&data), sizeof(uint64_t));
+
+    std::memcpy(this->buffer + this->currentPosition, toChars(data), sizeof(uint64_t));
     this->currentPosition += sizeof(uint64_t);
     return ESP_OK;
 }
@@ -117,7 +150,7 @@ esp_err_t NetBuffer::writeFloat(float data)
     {
         return ESP_FAIL;
     }
-    std::memcpy(this->buffer + this->currentPosition, reinterpret_cast<unsigned char *>(&data), sizeof(float));
+    std::memcpy(this->buffer + this->currentPosition, toChars(data), sizeof(float));
     this->currentPosition += sizeof(float);
     return ESP_OK;
 }
@@ -128,7 +161,7 @@ esp_err_t NetBuffer::writeBool(bool data)
     {
         return ESP_FAIL;
     }
-    std::memcpy(this->buffer + this->currentPosition, reinterpret_cast<unsigned char *>(&data), sizeof(bool));
+    std::memcpy(this->buffer + this->currentPosition, toChars(data), sizeof(bool));
     this->currentPosition += sizeof(bool);
     return ESP_OK;
 }
@@ -170,7 +203,7 @@ esp_err_t NetBuffer::writeShortString(char *data, size_t size)
 
 esp_err_t NetBuffer::writeString(const char *data)
 {
-    size_t size = sizeof(data);
+    size_t size = strlen(data);
     if (this->currentPosition + size > this->bufferSize)
     {
         return ESP_FAIL;
@@ -183,7 +216,7 @@ esp_err_t NetBuffer::writeString(const char *data)
 
 esp_err_t NetBuffer::writeShortString(const char *data)
 {
-    size_t size = sizeof(data);
+    size_t size = strlen(data);
     if (this->currentPosition + size > this->bufferSize)
     {
         return ESP_FAIL;
