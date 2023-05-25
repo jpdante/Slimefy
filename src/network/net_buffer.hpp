@@ -20,10 +20,9 @@ public:
 private:
     template <typename T>
     unsigned char *toChars(T src);
-    template <typename T>
-    T fromChars(unsigned char *const src);
 
 public:
+    esp_err_t reset();
     esp_err_t seek(size_t position);
     esp_err_t writeByte(int8_t data);
     esp_err_t writeUByte(uint8_t data);

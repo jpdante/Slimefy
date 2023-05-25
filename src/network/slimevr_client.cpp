@@ -1,6 +1,8 @@
 #include "slimevr_client.hpp"
 
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <esp_system.h>
 #include "net_buffer.hpp"
 
 #define PACKET_HEARTBEAT 0
@@ -35,12 +37,13 @@
 
 static const char *TAG = "SlimeVRClient";
 
-SlimeVRClient::SlimeVRClient()
+SlimeVRClient::SlimeVRClient() : sendBuffer(128)
 {
-    udpClient = UdpClient();
     udpServer = UdpServer();
     packetNumber = 0;
     connected = false;
+    lastPacketTime = 0;
+    timeout = 3000;
 }
 
 SlimeVRClient::~SlimeVRClient()
@@ -78,22 +81,22 @@ esp_err_t SlimeVRClient::stop()
 
 esp_err_t SlimeVRClient::connect(const char *host, int port)
 {
-    if (this->udpClient.isConnected())
+    if (this->udpServer.isConnected())
     {
         return ESP_OK;
     }
     ESP_LOGI(TAG, "Connecting to %s:%d", host, port);
-    return this->udpClient.connect(host, port);
+    return this->udpServer.connect(host, port);
 }
 
 esp_err_t SlimeVRClient::disconnect()
 {
-    if (!this->udpClient.isConnected())
+    if (!this->udpServer.isConnected())
     {
         return ESP_OK;
     }
     ESP_LOGI(TAG, "Disconnecting");
-    return this->udpClient.disconnect();
+    return this->udpServer.disconnect();
 }
 
 bool SlimeVRClient::isConnected()
@@ -106,72 +109,142 @@ bool SlimeVRClient::isRunning()
     return this->running;
 }
 
-void SlimeVRClient::writePacketHeader(NetBuffer &buffer, uint8_t packetType)
+void SlimeVRClient::writePacketHeader(uint8_t packetType)
 {
-    buffer.writeByte(0);
-    buffer.writeByte(0);
-    buffer.writeByte(0);
-    buffer.writeByte(packetType);
-    buffer.writeULong(packetNumber++);
+    this->sendBuffer.writeByte(0);
+    this->sendBuffer.writeByte(0);
+    this->sendBuffer.writeByte(0);
+    this->sendBuffer.writeByte(packetType);
+    this->sendBuffer.writeULong(packetNumber++);
 }
 
 esp_err_t SlimeVRClient::sendHeartbeat()
 {
-    NetBuffer buffer(12);
-    writePacketHeader(buffer, PACKET_HEARTBEAT);
+    this->sendBuffer.reset();
+    writePacketHeader(PACKET_HEARTBEAT);
     ESP_LOGI(TAG, "Sending heartbeat");
-    return this->udpClient.send(buffer);
+    return this->udpServer.send(this->sendBuffer);
 }
 
 esp_err_t SlimeVRClient::sendHandshake()
 {
-    NetBuffer buffer(256);
-    buffer.writeByte(0);
-    buffer.writeByte(0);
-    buffer.writeByte(0);
-    buffer.writeByte(PACKET_HANDSHAKE);
-    buffer.writeULong(0);
+    this->sendBuffer.reset();
+    this->sendBuffer.writeByte(0);
+    this->sendBuffer.writeByte(0);
+    this->sendBuffer.writeByte(0);
+    this->sendBuffer.writeByte(PACKET_HANDSHAKE);
+    this->sendBuffer.writeULong(0);
 
-    buffer.writeInt(5); // Board
-    buffer.writeInt(8); // IMU
-    buffer.writeInt(2); // CPU Count
+    this->sendBuffer.writeInt(5); // Board
+    this->sendBuffer.writeInt(8); // IMU
+    this->sendBuffer.writeInt(2); // CPU Count
 
-    buffer.writeInt(0);
-    buffer.writeInt(0);
-    buffer.writeInt(0);
+    this->sendBuffer.writeInt(0);
+    this->sendBuffer.writeInt(0);
+    this->sendBuffer.writeInt(0);
 
-    buffer.writeInt(16); // Build Version
-    buffer.writeShortString("0.3.3"); // Version String
+    this->sendBuffer.writeInt(16);              // Build Version
+    this->sendBuffer.writeShortString("0.3.3"); // Version String
     uint8_t mac[6] = {0xC4, 0xDE, 0xE2, 0x13, 0x95, 0xEC};
-    buffer.writeByteArray(mac, sizeof(mac)); // Mac Address
+    this->sendBuffer.writeByteArray(mac, sizeof(mac)); // Mac Address
 
     ESP_LOGI(TAG, "Sending handshake");
-    return this->udpClient.send(buffer);
+    return this->udpServer.send(sendBuffer);
 }
 
-void SlimeVRClient::internalPacketReceived(char buffer[], size_t size, struct sockaddr_in client_addr, socklen_t client_addr_len)
+esp_err_t SlimeVRClient::sendSensorInfo(uint8_t id)
 {
-    char hex_buffer[size * 3 + 1];
+    this->sendBuffer.reset();
+    this->writePacketHeader(PACKET_SENSOR_INFO);
+    this->sendBuffer.writeByte(id);
+    this->sendBuffer.writeByte(1);
+    this->sendBuffer.writeByte(8);
+    return this->udpServer.send(sendBuffer);
+}
+
+float generateRandomFloat()
+{
+    uint32_t randomValue = esp_random();
+    float randomFloat = (float)randomValue / UINT32_MAX;
+    return randomFloat;
+}
+
+esp_err_t SlimeVRClient::sendAcceleration(uint8_t id)
+{
+    this->sendBuffer.reset();
+    this->writePacketHeader(PACKET_ACCEL);
+    this->sendBuffer.writeFloat(generateRandomFloat());
+    this->sendBuffer.writeFloat(generateRandomFloat());
+    this->sendBuffer.writeFloat(generateRandomFloat());
+    this->sendBuffer.writeByte(id);
+    return this->udpServer.send(sendBuffer);
+}
+
+void SlimeVRClient::processSensorInfo(unsigned char buffer[], size_t size)
+{
+}
+
+void SlimeVRClient::internalPacketReceived(unsigned char buffer[], size_t size, struct sockaddr_in client_addr, socklen_t client_addr_len)
+{
+    lastPacketTime = (uint64_t)(esp_timer_get_time() / 1000ULL);
+
+    /*char hex_buffer[size * 3 + 1];
     memset(hex_buffer, 0, sizeof(hex_buffer));
     for (int i = 0; i < size; i++)
     {
         snprintf(hex_buffer + i * 3, 4, "%02X ", (unsigned char)buffer[i]);
     }
-    ESP_LOGI(TAG, "%s:%d: %s", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), hex_buffer);
+    ESP_LOGI(TAG, "%s:%d: %s", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), hex_buffer);*/
 
-    switch (buffer[0])
+    if (this->connected)
     {
-    case PACKET_HANDSHAKE:
-        ESP_LOGI(TAG, "Handshake successful");
-        this->connected = true;
-        return;
-    case PACKET_HEARTBEAT:
-        //ESP_LOGI(TAG, "Heartbeat received from %s:%d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-        //this->sendHeartbeat();
-        break;
+        switch (buffer[3])
+        {
+        case PACKET_HEARTBEAT:
+            ESP_LOGI(TAG, "Heartbeat received");
+            this->sendHeartbeat();
+            break;
+        case PACKET_RECEIVE_VIBRATE:
+            ESP_LOGI(TAG, "Vibrate received");
+            break;
+        case PACKET_RECEIVE_HANDSHAKE:
+            ESP_LOGI(TAG, "Handshake received");
+            break;
+        case PACKET_RECEIVE_COMMAND:
+            ESP_LOGI(TAG, "Command received");
+            break;
+        case PACKET_CONFIG:
+            ESP_LOGI(TAG, "Config received");
+            break;
+        case PACKET_PING_PONG:
+            ESP_LOGI(TAG, "Ping received");
+            this->udpServer.send((unsigned char *)buffer, size);
+            break;
+        case PACKET_SENSOR_INFO:
+            ESP_LOGI(TAG, "Sensor Info received");
+            if (size < 6)
+            {
+                ESP_LOGW(TAG, "Wrong sensor info packet");
+                break;
+            }
+            this->processSensorInfo(buffer, size);
+            break;
+        }
+        if (lastPacketTime + timeout < (uint64_t)(esp_timer_get_time() / 1000ULL))
+        {
+            this->connected = false;
+            ESP_LOGW(TAG, "Connection to server timed out");
+        }
     }
-    if (!this->connected)
+    else
     {
+        switch (buffer[0])
+        {
+        case PACKET_HANDSHAKE:
+            ESP_LOGI(TAG, "Handshake successful");
+            this->connected = true;
+            return;
+        }
         this->connect(inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
         this->sendHandshake();
     }
@@ -180,26 +253,18 @@ void SlimeVRClient::internalPacketReceived(char buffer[], size_t size, struct so
 void SlimeVRClient::listen(void *arg)
 {
     SlimeVRClient *client = (SlimeVRClient *)arg;
-    size_t size = 1500;
-    char recv_buffer[size];
+    const size_t size = 128;
+    unsigned char recv_buffer[size];
     memset(recv_buffer, 0, sizeof(recv_buffer));
     for (;;)
     {
         struct sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
 
-        ssize_t len = client->udpServer.receive(recv_buffer, size, &client_addr, &client_addr_len);
+        ssize_t len = client->udpServer.receive((char *)recv_buffer, size, &client_addr, &client_addr_len);
         if (len > 0)
         {
             client->internalPacketReceived(recv_buffer, len, client_addr, client_addr_len);
-            /*ESP_LOGI(TAG, "Received data from %s:%d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-            char hex_buffer[len * 3 + 1];
-            memset(hex_buffer, 0, sizeof(hex_buffer));
-            for (int i = 0; i < len; i++)
-            {
-                snprintf(hex_buffer + i * 3, 4, "%02X ", (unsigned char)recv_buffer[i]);
-            }
-            ESP_LOGI(TAG, "Data (hex): %s", hex_buffer);*/
         }
     }
     vTaskDelete(NULL);

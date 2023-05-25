@@ -11,6 +11,7 @@
 #include "network/wifi_manager.hpp"
 #include "network/ping_client.hpp"
 #include "network/slimevr_client.hpp"
+#include "utils/timing.hpp"
 
 StorageManager storageManager;
 WifiManager wifiManager;
@@ -22,32 +23,27 @@ void run(void *arg);
 extern "C" void app_main()
 {
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-    xTaskCreate(run, "Program", 4096, NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreatePinnedToCore(run, "Program", 4096, NULL, tskIDLE_PRIORITY, NULL, tskNO_AFFINITY);
+    // xTaskCreatePinnedToCore(telemetry, "Telemetry", 4096, NULL, tskIDLE_PRIORITY, NULL, tskNO_AFFINITY + 1);
 }
 
+ulong current = 0;
+ulong updateCurrent = 0;
+bool infoSent = false;
+int tps = 0;
 void run(void *arg)
 {
     storageManager.init();
     wifiManager.init();
     wifiManager.connect("Ellisium", "18315019");
-    xTaskCreate(telemetry, "Telemetry", 4096, NULL, tskIDLE_PRIORITY, NULL);
-    vTaskDelete(NULL);
-}
 
-ulong millis()
-{
-    return (ulong)(esp_timer_get_time() / 1000ULL);
-}
-
-ulong current = 0;
-void telemetry(void *arg)
-{
     current = millis();
     for (;;)
     {
-        if (millis() - current >= 5000)
+        ulong time = millis();
+        if (time - current >= 5000)
         {
-            current = millis();
+            current = time;
             ESP_LOGI("Telemetry", "WIFI state: %s", wifiManager.getStateName());
             if (wifiManager.state != WifiState::CONNECTED)
             {
@@ -57,6 +53,38 @@ void telemetry(void *arg)
             {
                 slimeClient.start();
             }
+            ESP_LOGI("Telemetry", "WIFI state: %d", (tps / 5));
+            tps = 0;
+        }
+        if (time - updateCurrent >= 7)
+        {
+            updateCurrent = time;
+            if (!infoSent && slimeClient.isConnected())
+            {
+                slimeClient.sendSensorInfo(1);
+                slimeClient.sendSensorInfo(2);
+                slimeClient.sendSensorInfo(3);
+                slimeClient.sendSensorInfo(4);
+                slimeClient.sendSensorInfo(5);
+                slimeClient.sendSensorInfo(6);
+                infoSent = true;
+            }
+            if (infoSent && slimeClient.isConnected())
+            {
+                slimeClient.sendAcceleration(1);
+                slimeClient.sendAcceleration(2);
+                slimeClient.sendAcceleration(3);
+                slimeClient.sendAcceleration(4);
+                slimeClient.sendAcceleration(5);
+                slimeClient.sendAcceleration(6);
+                tps++;
+            }
         }
     }
+    vTaskDelete(NULL);
+}
+
+void telemetry(void *arg)
+{
+    vTaskDelete(NULL);
 }

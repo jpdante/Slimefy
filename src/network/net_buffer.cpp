@@ -18,21 +18,6 @@ unsigned char * NetBuffer::toChars(T src)
     return convBuf;
 }
 
-template <typename T>
-T NetBuffer::fromChars(unsigned char * const src)
-{
-    union data
-    {
-        unsigned char buffer[sizeof(T)];
-        T value;
-    } un;
-    for (size_t i = 0; i < sizeof(T); i++)
-    {
-        un.buffer[i] = src[sizeof(T) - i - 1];
-    }
-    return un.value;
-}
-
 NetBuffer::NetBuffer(size_t size)
 {
     buffer = new unsigned char[size];
@@ -64,6 +49,12 @@ NetBuffer &NetBuffer::operator=(const NetBuffer &other)
         std::memcpy(buffer, other.buffer, bufferSize);
     }
     return *this;
+}
+
+esp_err_t NetBuffer::reset()
+{
+    currentPosition = 0;
+    return ESP_OK;
 }
 
 esp_err_t NetBuffer::seek(size_t position)
